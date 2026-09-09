@@ -1,0 +1,80 @@
+# Run via terminal: streamlit run dashboard.py
+import time
+import pandas as pd
+import plotly.express as px
+import streamlit as st
+
+st.set_page_config(
+    page_title="Canteen Digital Twin & Routing Simulation", layout="wide"
+)
+
+st.title("🏢 Canteen Digital Twin Simulation Engine")
+
+DATA_FILE = "canteen_footfall_log.csv"
+MAX_CAPACITY = 40  # Set your safety threshold limit here
+
+if not pd.io.common.file_exists(DATA_FILE):
+  st.warning(
+      "No telemetry log file found. Run 'logger_app.py' first and record some"
+      " entry/exit data."
+  )
+else:
+  df = pd.read_csv(DATA_FILE)
+
+  if df.empty:
+    st.info("The log file is currently empty. Record data to run simulation.")
+  else:
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df = df.sort_values("timestamp")
+
+    # Calculate cumulative running occupancy over time
+    df["net_change"] = df["event_type"].apply(
+        lambda x: 1 if x == "ENTRY" else -1
+    )
+    df["current_occupancy"] = df["net_change"].cumsum()
+
+    current_load = (
+        df["current_occupancy"].iloc[-1]
+        if not df["current_occupancy"].empty
+        else 0
+    )
+    is_overflow = current_load >= MAX_CAPACITY
+
+    # Top Metric Panels
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Live Occupancy Estimate", f"{current_load} / {MAX_CAPACITY}")
+    c2.metric(
+        "System Status",
+        "OVERFLOW RISK" if is_overflow else "NORMAL FLOW",
+        delta_color="inverse" if is_overflow else "normal",
+    )
+    c3.metric("Total Recorded Events", len(df))
+
+    if is_overflow:
+      st.error(
+          "⚠️ **CAPACITY BREACH PREDICTED:** Canteen occupancy has crossed safety"
+          f" limits ({current_load}/{MAX_CAPACITY})."
+      )
+      st.warning(
+          "💡 **Automated Mitigation Active:** Rerouting incoming traffic to"
+          " **Alternative Mess Hall B** via Corridor North."
+      )
+    else:
+      st.success("✅ Canteen operating within safe parameters.")
+
+    # Timeline Graph of Real-World Data Simulation
+    st.subheader("Occupancy Timeline Simulation")
+    fig = px.line(
+        df,
+        x="timestamp",
+        y="current_occupancy",
+        markers=True,
+        title="Real-World Footfall Accumulation Curve",
+    )
+    fig.add_hline(
+        y=MAX_CAPACITY,
+        line_dash="dash",
+        line_color="red",
+        annotation_text="Capacity Limit",
+    )
+    st.plotly_chart(fig, use_container_width=True)
