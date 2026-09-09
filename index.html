@@ -3,16 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Canteen Footfall Logger</title>
-    <!-- Tailwind CSS for modern mobile-responsive styling -->
+    <title>Multi-Station Canteen Logger</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 </head>
 <body class="bg-slate-900 text-white min-h-screen flex flex-col justify-between p-4">
 
-    <!-- Header -->
-    <header class="text-center py-4">
-        <h1 class="text-2xl font-bold tracking-wide">🚪 Canteen Door Logger</h1>
-        <p class="text-slate-400 text-sm">Tap buttons to record entry/exit events</p>
+    <!-- Header & Station Selector -->
+    <header class="text-center py-4 space-y-2">
+        <h1 class="text-2xl font-bold tracking-wide">🚪 Canteen Footfall Logger</h1>
+        <div class="max-w-xs mx-auto">
+            <label class="block text-xs text-slate-400 mb-1">Select Your Assigned Station / Door:</label>
+            <select id="stationSelect" onchange="updateStation()" class="w-full bg-slate-800 border border-slate-700 text-white text-sm rounded-xl p-2.5 font-semibold focus:ring-2 focus:ring-blue-500">
+                <option value="Station_1">Door 1 (Main Entrance)</option>
+                <option value="Station_2">Door 2 (Side Exit)</option>
+                <option value="Station_3">Door 3 (Back Corridor)</option>
+            </select>
+        </div>
     </header>
 
     <!-- Live Telemetry Card -->
@@ -48,31 +56,60 @@
                 📥 Export CSV
             </button>
             <button onclick="clearLogs()" class="bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-3 px-4 rounded-xl text-sm shadow">
-                🗑️ Clear
+                🗑️ Clear DB
             </button>
         </div>
 
         <!-- Recent Logs Preview -->
         <div class="bg-slate-800 p-4 rounded-2xl border border-slate-700">
-            <h2 class="text-sm font-semibold text-slate-400 mb-2">Recent Log History</h2>
+            <h2 class="text-sm font-semibold text-slate-400 mb-2">Live Cloud Log Stream</h2>
             <div id="logList" class="space-y-1 text-xs text-slate-300 max-h-32 overflow-y-auto">
-                <p class="text-slate-500 italic">No events recorded yet.</p>
+                <p class="text-slate-500 italic">Connecting to cloud database...</p>
             </div>
         </div>
     </main>
 
     <!-- Footer -->
     <footer class="text-center text-xs text-slate-500 py-2">
-        Mobile-First Telemetry Collector
+        GitHub Pages Hosted Logger
     </footer>
 
-    <!-- JavaScript Logic -->
+    <!-- Firebase & App Logic -->
     <script>
-        let logs = JSON.parse(localStorage.getItem('canteen_logs')) || [];
+        const firebaseConfig = {
+            apiKey: "YOUR_FIREBASE_API_KEY",
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        // Load saved station preference or default to Station_1
+        let currentStation = localStorage.getItem('canteen_station') || 'Station_1';
+        document.getElementById('stationSelect').value = currentStation;
+
+        function updateStation() {
+            currentStation = document.getElementById('stationSelect').value;
+            localStorage.setItem('canteen_station', currentStation);
+        }
+
+        let cachedLogs = [];
+
+        db.collection("canteen_logs").orderBy("timestamp", "desc").onSnapshot((snapshot) => {
+            cachedLogs = [];
+            snapshot.forEach((doc) => {
+                cachedLogs.push({ id: doc.id, ...doc.data() });
+            });
+            updateUI();
+        });
 
         function updateUI() {
-            let entries = logs.filter(l => l.event_type === 'ENTRY').length;
-            let exits = logs.filter(l => l.event_type === 'EXIT').length;
+            let entries = cachedLogs.filter(l => l.event_type === 'ENTRY').length;
+            let exits = cachedLogs.filter(l => l.event_type === 'EXIT').length;
             let occupancy = Math.max(0, entries - exits);
 
             document.getElementById('totalEntries').innerText = entries;
@@ -80,32 +117,38 @@
             document.getElementById('currentOccupancy').innerText = occupancy;
 
             let logListHTML = '';
-            logs.slice(-5).reverse().forEach(log => {
+            cachedLogs.slice(0, 5).forEach(log => {
                 let colorClass = log.event_type === 'ENTRY' ? 'text-emerald-400' : 'text-rose-400';
+                let timeStr = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : '';
+                let stationLabel = log.station || 'Unknown';
                 logListHTML += `<div class="flex justify-between border-b border-slate-700 py-1">
-                    <span class="${colorClass} font-semibold">${log.event_type}</span>
-                    <span class="text-slate-400">${log.timestamp}</span>
+                    <div><span class="${colorClass} font-semibold">${log.event_type}</span> <span class="text-slate-500 text-[10px]">(${stationLabel})</span></div>
+                    <span class="text-slate-400">${timeStr}</span>
                 </div>`;
             });
             document.getElementById('logList').innerHTML = logListHTML || '<p class="text-slate-500 italic">No events recorded yet.</p>';
-            
-            localStorage.setItem('canteen_logs', JSON.stringify(logs));
         }
 
         function logEvent(type) {
-            let now = new Date();
-            let timestamp = now.toISOString().slice(0, 19).replace('T', ' ');
-            logs.push({ timestamp, event_type: type });
-            updateUI();
+            let timestamp = new Date().toISOString();
+            db.collection("canteen_logs").add({
+                timestamp: timestamp,
+                event_type: type,
+                station: currentStation
+            }).catch((error) => {
+                alert("Error writing log: " + error.message);
+            });
         }
 
         function exportCSV() {
-            if (logs.length === 0) {
+            if (cachedLogs.length === 0) {
                 alert("No data to export!");
                 return;
             }
-            let csvContent = "data:text/csv;charset=utf-8,timestamp,event_type\n" + 
-                logs.map(e => `"${e.timestamp}","${e.event_type}"`).join("\n");
+            let sortedLogs = [...cachedLogs].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            
+            let csvContent = "data:text/csv;charset=utf-8,timestamp,event_type,station\n" + 
+                sortedLogs.map(e => `"${e.timestamp}","${e.event_type}","${e.station || 'Station_1'}"`).join("\n");
             
             let encodedUri = encodeURI(csvContent);
             let link = document.createElement("a");
@@ -117,14 +160,12 @@
         }
 
         function clearLogs() {
-            if (confirm("Are you sure you want to clear all logs?")) {
-                logs = [];
-                localStorage.removeItem('canteen_logs');
-                updateUI();
+            if (confirm("Are you sure you want to clear all cloud database logs?")) {
+                db.collection("canteen_logs").get().then((querySnapshot) => {
+                    querySnapshot.forEach((doc) => { doc.ref.delete(); });
+                });
             }
         }
-
-        updateUI();
     </script>
 </body>
 </html>
