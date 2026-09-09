@@ -1,80 +1,130 @@
-# Run via terminal: streamlit run dashboard.py
-import time
-import pandas as pd
-import plotly.express as px
-import streamlit as st
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canteen Footfall Logger</title>
+    <!-- Tailwind CSS for modern mobile-responsive styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex flex-col justify-between p-4">
 
-st.set_page_config(
-    page_title="Canteen Digital Twin & Routing Simulation", layout="wide"
-)
+    <!-- Header -->
+    <header class="text-center py-4">
+        <h1 class="text-2xl font-bold tracking-wide">🚪 Canteen Door Logger</h1>
+        <p class="text-slate-400 text-sm">Tap buttons to record entry/exit events</p>
+    </header>
 
-st.title("🏢 Canteen Digital Twin Simulation Engine")
+    <!-- Live Telemetry Card -->
+    <main class="flex-1 flex flex-col justify-center max-w-md w-full mx-auto space-y-6">
+        <div class="grid grid-cols-3 gap-3 text-center bg-slate-800 p-4 rounded-2xl shadow-lg border border-slate-700">
+            <div>
+                <p class="text-xs text-slate-400">Entries</p>
+                <p id="totalEntries" class="text-2xl font-bold text-emerald-400">0</p>
+            </div>
+            <div>
+                <p class="text-xs text-slate-400">Exits</p>
+                <p id="totalExits" class="text-2xl font-bold text-rose-400">0</p>
+            </div>
+            <div>
+                <p class="text-xs text-slate-400">Occupancy</p>
+                <p id="currentOccupancy" class="text-2xl font-bold text-cyan-400">0</p>
+            </div>
+        </div>
 
-DATA_FILE = "canteen_footfall_log.csv"
-MAX_CAPACITY = 40  # Set your safety threshold limit here
+        <!-- Big Touch-Friendly Buttons -->
+        <div class="space-y-4">
+            <button onclick="logEvent('ENTRY')" class="w-full bg-emerald-600 active:bg-emerald-700 hover:bg-emerald-500 text-white font-bold py-6 px-4 rounded-2xl text-xl shadow-lg transition transform active:scale-95 flex items-center justify-center space-x-2">
+                <span>➕ PERSON ENTERED</span>
+            </button>
+            <button onclick="logEvent('EXIT')" class="w-full bg-rose-600 active:bg-rose-700 hover:bg-rose-500 text-white font-bold py-6 px-4 rounded-2xl text-xl shadow-lg transition transform active:scale-95 flex items-center justify-center space-x-2">
+                <span>➖ PERSON EXITED</span>
+            </button>
+        </div>
 
-if not pd.io.common.file_exists(DATA_FILE):
-  st.warning(
-      "No telemetry log file found. Run 'logger_app.py' first and record some"
-      " entry/exit data."
-  )
-else:
-  df = pd.read_csv(DATA_FILE)
+        <!-- Action Controls -->
+        <div class="flex space-x-3 pt-4">
+            <button onclick="exportCSV()" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 rounded-xl text-sm shadow">
+                📥 Export CSV
+            </button>
+            <button onclick="clearLogs()" class="bg-slate-700 hover:bg-slate-600 text-slate-300 font-semibold py-3 px-4 rounded-xl text-sm shadow">
+                🗑️ Clear
+            </button>
+        </div>
 
-  if df.empty:
-    st.info("The log file is currently empty. Record data to run simulation.")
-  else:
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    df = df.sort_values("timestamp")
+        <!-- Recent Logs Preview -->
+        <div class="bg-slate-800 p-4 rounded-2xl border border-slate-700">
+            <h2 class="text-sm font-semibold text-slate-400 mb-2">Recent Log History</h2>
+            <div id="logList" class="space-y-1 text-xs text-slate-300 max-h-32 overflow-y-auto">
+                <p class="text-slate-500 italic">No events recorded yet.</p>
+            </div>
+        </div>
+    </main>
 
-    # Calculate cumulative running occupancy over time
-    df["net_change"] = df["event_type"].apply(
-        lambda x: 1 if x == "ENTRY" else -1
-    )
-    df["current_occupancy"] = df["net_change"].cumsum()
+    <!-- Footer -->
+    <footer class="text-center text-xs text-slate-500 py-2">
+        Mobile-First Telemetry Collector
+    </footer>
 
-    current_load = (
-        df["current_occupancy"].iloc[-1]
-        if not df["current_occupancy"].empty
-        else 0
-    )
-    is_overflow = current_load >= MAX_CAPACITY
+    <!-- JavaScript Logic -->
+    <script>
+        let logs = JSON.parse(localStorage.getItem('canteen_logs')) || [];
 
-    # Top Metric Panels
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Live Occupancy Estimate", f"{current_load} / {MAX_CAPACITY}")
-    c2.metric(
-        "System Status",
-        "OVERFLOW RISK" if is_overflow else "NORMAL FLOW",
-        delta_color="inverse" if is_overflow else "normal",
-    )
-    c3.metric("Total Recorded Events", len(df))
+        function updateUI() {
+            let entries = logs.filter(l => l.event_type === 'ENTRY').length;
+            let exits = logs.filter(l => l.event_type === 'EXIT').length;
+            let occupancy = Math.max(0, entries - exits);
 
-    if is_overflow:
-      st.error(
-          "⚠️ **CAPACITY BREACH PREDICTED:** Canteen occupancy has crossed safety"
-          f" limits ({current_load}/{MAX_CAPACITY})."
-      )
-      st.warning(
-          "💡 **Automated Mitigation Active:** Rerouting incoming traffic to"
-          " **Alternative Mess Hall B** via Corridor North."
-      )
-    else:
-      st.success("✅ Canteen operating within safe parameters.")
+            document.getElementById('totalEntries').innerText = entries;
+            document.getElementById('totalExits').innerText = exits;
+            document.getElementById('currentOccupancy').innerText = occupancy;
 
-    # Timeline Graph of Real-World Data Simulation
-    st.subheader("Occupancy Timeline Simulation")
-    fig = px.line(
-        df,
-        x="timestamp",
-        y="current_occupancy",
-        markers=True,
-        title="Real-World Footfall Accumulation Curve",
-    )
-    fig.add_hline(
-        y=MAX_CAPACITY,
-        line_dash="dash",
-        line_color="red",
-        annotation_text="Capacity Limit",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+            let logListHTML = '';
+            logs.slice(-5).reverse().forEach(log => {
+                let colorClass = log.event_type === 'ENTRY' ? 'text-emerald-400' : 'text-rose-400';
+                logListHTML += `<div class="flex justify-between border-b border-slate-700 py-1">
+                    <span class="${colorClass} font-semibold">${log.event_type}</span>
+                    <span class="text-slate-400">${log.timestamp}</span>
+                </div>`;
+            });
+            document.getElementById('logList').innerHTML = logListHTML || '<p class="text-slate-500 italic">No events recorded yet.</p>';
+            
+            localStorage.setItem('canteen_logs', JSON.stringify(logs));
+        }
+
+        function logEvent(type) {
+            let now = new Date();
+            let timestamp = now.toISOString().slice(0, 19).replace('T', ' ');
+            logs.push({ timestamp, event_type: type });
+            updateUI();
+        }
+
+        function exportCSV() {
+            if (logs.length === 0) {
+                alert("No data to export!");
+                return;
+            }
+            let csvContent = "data:text/csv;charset=utf-8,timestamp,event_type\n" + 
+                logs.map(e => `"${e.timestamp}","${e.event_type}"`).join("\n");
+            
+            let encodedUri = encodeURI(csvContent);
+            let link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "canteen_footfall_log.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function clearLogs() {
+            if (confirm("Are you sure you want to clear all logs?")) {
+                logs = [];
+                localStorage.removeItem('canteen_logs');
+                updateUI();
+            }
+        }
+
+        updateUI();
+    </script>
+</body>
+</html>
